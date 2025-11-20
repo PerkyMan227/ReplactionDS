@@ -1,4 +1,4 @@
-package Client
+package main
 
 import (
 	"fmt"
@@ -62,52 +62,19 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Print("Enter your bid amount (or type 'result' to get the auction result): ")
-		input, _ := reader.ReadString('\n')
-		input = input[:len(input)-1] // remove newline character
-		if input == "result" {
-			result, err := getResult(client)
-			if err != nil {
-				log.Printf("Error getting result: %v", err)
-				continue
-			}
-			if result.AuctionOver {
-				fmt.Printf("Auction over! Winner: %s with bid: %d\n", result.Winner, result.HighestBid)
-				break
-			} else {
-				fmt.Printf("Current highest bid: %d\n", result.HighestBid)
-			}
-		} else {
-			var amount int
-			_, err := fmt.Sscanf(input, "%d", &amount)
-			if err != nil {
-				fmt.Println("Invalid input. Please enter a valid bid amount.")
-				continue
-			}
-			ack, err := placeBid(client, bidderID, amount)
-			if err != nil {
-				log.Printf("Error placing bid: %v", err)
-				continue
-			}
-			switch ack.Outcome {
-			case Success:
-				fmt.Println("Bid accepted!")
-			case Fail:
-				fmt.Println("Bid too low, try again.")
-			case Exception:
-				fmt.Println("An error occurred while placing your bid.")
-			}
-		}
+		// WHAT DO??
+		// if reader 
+
+		// BID -> send bid request to server with res, err := client.Bid(id, amount)
+
+		// GET RESULT -> send request to server for result with client.Result()
 	}
+
+
+
+
+
+
+
 }
 
-func bid(bidderID string, amount int) (Ack, error) {
-	//given a bid, returns an outcome among {fail, success or exception}
-	//brug servers bid() metode
-
-}
-
-func (s *Server) result() (Result, error) {
-	//if the auction is over, it returns the result, else highest bid.
-	//brug servers result() metode
-}

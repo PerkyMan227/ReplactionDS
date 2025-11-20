@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -29,7 +30,7 @@ type Server struct {
 }
 
 type AuctionState struct {
-	BidderHighestBid     map[string]int32 // bidder_id -> highest bid
+	BidderHighestBids    map[string]int32 // bidder_id -> highest bid
 	CurrentHighestBidder string
 	CurrentHighestBid    int32
 	AuctionStartTime     int64 //milisec
@@ -59,12 +60,21 @@ func main() {
 	} else {
 		log.Printf("Server %d is starting as BACKUP on port %d", server.ServerID, server.port)
 	}
+
+	go server.connectToPeer()
+
+	if !server.isPrimary {
+		go server.monitorPrimary()
+	}
+
+	//start grpc server
+
 }
 
 func initializeAuctionState(durationSeconds int64) *AuctionState {
 	now := time.Now().UnixMilli()
 	return &AuctionState{
-		BidderHighestBid:     make(map[string]int32),
+		BidderHighestBids:    make(map[string]int32),
 		CurrentHighestBidder: "",
 		CurrentHighestBid:    0,
 		AuctionStartTime:     now,
@@ -137,14 +147,95 @@ func (s *Server) startElection() {
 }
 
 func (s *Server) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.isPrimary {
+		return &pb.BidResponse{
+			Outcome: pb.BidResponse_EXCEPTION,
+			Message: "This server is not the primary. Please contact the primary server.",
+		}, nil
+	}
+
+	bidderID := req.BidderId
+	amount := req.Amount
+
+	now := time.Now().UnixMilli()
+	if now >= s.state.AuctionEndTime {
+		return &pb.BidResponse{
+			Outcome: pb.BidResponse_FAIL,
+			Message: "Auction has ended.",
+		}, nil
+	}
+
+	if bidderID == "" {
+		return &pb.BidResponse{
+			Outcome: pb.BidResponse_FAIL,
+			Message: "Bidder ID cannot be empty.",
+		}, nil
+	}
+
+	previousBid, exists := s.state.BidderHighestBids[bidderID]
+
+	if !exists {
+		s.state.RegisteredBidders = append(s.state.RegisteredBidders, bidderID)
+		log.Printf("Registered new bidder: %s", bidderID)
+	} else {
+		if amount <= previousBid {
+			return &pb.BidResponse{
+				Outcome: pb.BidResponse_FAIL,
+				Message: fmt.Sprintf("Bid must be hight than the pevious bid (%d)", previousBid),
+			}, nil
+		}
+	}
+
+	if amount <= s.state.CurrentHighestBid {
+		return &pb.BidResponse{
+			Outcome: pb.BidResponse_FAIL,
+			Message: fmt.Sprintf("Bid must be hight than the current highest bid (%d)", s.state.CurrentHighestBid),
+		}, nil
+	}
+
+	s.state.BidderHighestBids[bidderID] = amount
+	s.state.CurrentHighestBidder = bidderID
+	s.state.CurrentHighestBid = amount
+
+	log.Printf("Bid accepted! %s is now winning with $%d", bidderID, amount)
+
+	//REPLICATE TO BACKUP HERE
+
 	return &pb.BidResponse{
-		Outcome: pb.BidResponse_EXCEPTION,
-		Message: "Not implemented yet",
+		Outcome: pb.BidResponse_SUCCESS,
+		Message: fmt.Sprintf("Your bid was accepted! You are currently winning with: $%d", amount),
 	}, nil
 }
 
 func (s *Server) Result(ctx context.Context, req *pb.ResultRequest) (*pb.ResultResponse, error) {
-	return &pb.ResultResponse{}, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	auctionEnded := now >= s.state.AuctionEndTime || s.state.AuctionEnded
+
+	var timeRemaining int64
+	if !auctionEnded {
+		timeRemaining = (s.state.AuctionEndTime - now) / 1000 //conv to sec
+	}
+
+	response := &pb.ResultResponse{
+		AuctionEnded:  auctionEnded,
+		HighestBidder: s.state.CurrentHighestBidder,
+		HighestBid:    s.state.CurrentHighestBid,
+		TimeRemaining: timeRemaining,
+	}
+
+	if auctionEnded {
+		log.Printf("Result query - Auction ended. Winner is: %s with $%d. WOW!", s.state.CurrentHighestBidder, s.state.CurrentHighestBid)
+	} else {
+		log.Printf("Result query - Current leader is: %s with $%d. Time remaining: %d seconds", s.state.CurrentHighestBidder, s.state.CurrentHighestBid, timeRemaining)
+	}
+
+	return response, nil
 }
 
 func (s *Server) ReplicateState(ctx context.Context, req *pb.StateUpdate) (*pb.StateAck, error) {
@@ -168,4 +259,4 @@ func (s *Server) StartElection(ctx context.Context, req *pb.ElectionRequest) (*p
 
 func (s *Server) AnnounceLeader(ctx context.Context, req *pb.LeaderAnnouncement) (*pb.LeaderAck, error) {
 	return &pb.LeaderAck{Acknowledged: true, ServerId: s.ServerID}, nil
-}	
+}
