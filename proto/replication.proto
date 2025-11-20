@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+option go_package = "./proto";
+
+package auction;
+
+// Service for both client requests and server-to-server communication
+service AuctionService {
+
+    
+  // ===== CLIENT API =====
+  // Clients call these methods on servers
+  rpc Bid(BidRequest) returns (BidResponse);
+  rpc Result(ResultRequest) returns (ResultResponse);
+  
+  // ===== SERVER-TO-SERVER COMMUNICATION =====
+  // Primary replicates state to backup after each bid
+  rpc ReplicateState(StateUpdate) returns (StateAck);
+  
+  // Backup sends heartbeats to primary to detect failures
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Election message for Bully Algorithm (sent to higher-ID server)
+  rpc StartElection(ElectionRequest) returns (ElectionResponse);
+  
+  // New primary announces itself to backup
+  rpc AnnounceLeader(LeaderAnnouncement) returns (LeaderAck);
+}
+
+// ===== CLIENT API MESSAGES =====
+
+message BidRequest {
+  string bidder_id = 1; 
+  int32 amount = 2;     
+}
+
+message BidResponse {
+  enum Outcome {
+    SUCCESS = 0;   
+    FAIL = 1;       
+    EXCEPTION = 2;  
+  }
+  Outcome outcome = 1;
+  string message = 2;  
+}
+
+message ResultRequest {
+  //Empty 
+}
+
+message ResultResponse {
+  bool auction_ended = 1;      
+  string highest_bidder = 2;   
+  int32 highest_bid = 3;       
+  int64 time_remaining = 4;   
+}
+
+// ===== SERVER-TO-SERVER REPLICATION MESSAGES =====
+
+message StateUpdate {
+  int32 sender_server_id = 1;   
+  AuctionState state = 2;        
+  int64 timestamp = 3;           
+}
+
+message AuctionState {
+  // Map of bidder_id -> their highest bid
+  map<string, int32> bidder_highest_bids = 1;
+  
+  // Current auction status
+  string current_highest_bidder = 2;
+  int32 current_highest_bid = 3;
+  
+  // Timing information
+  int64 auction_start_time = 4;  //Unix timestamp
+  int64 auction_end_time = 5;    //Unix timestamp 
+  bool auction_ended = 6;
+  
+  
+  repeated string registered_bidders = 7;
+}
+
+message StateAck {
+  bool success = 1;
+  int32 server_id = 2;
+  string error_message = 3;  // If success=false, why?
+}
+
+// ===== LEADER ELECTION MESSAGES =====
+
+message HeartbeatRequest {
+  int32 server_id = 1;
+  int64 timestamp = 2;
+}
+
+message HeartbeatResponse {
+  bool alive = 1;
+  bool is_primary = 2;
+  int32 server_id = 3;
+}
+
+message ElectionRequest {
+  int32 candidate_server_id = 1; 
+}
+
+message ElectionResponse {
+  bool ok = 1;  
+  int32 responder_server_id = 2;
+}
+
+message LeaderAnnouncement {
+  int32 new_primary_id = 1;
+  int64 timestamp = 2;
+}
+
+message LeaderAck {
+  bool acknowledged = 1;
+  int32 server_id = 2;
+}
