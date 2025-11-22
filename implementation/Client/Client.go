@@ -63,7 +63,7 @@ func main() {
 
 	for {
 		// WHAT DO??
-		// if reader 
+		// if reader.equals("bid")
 
 		// BID -> send bid request to server with res, err := client.Bid(id, amount)
 
@@ -76,5 +76,34 @@ func main() {
 
 
 
+}
+
+func handleBid(client pb.AuctionServiceClient, bidderID string, amount int64) {
+    req := &pb.BidRequest{
+        BidderId: bidderID,
+        Amount:   amount,
+    }
+
+    res, err := client.Bid(context.Background(), req)
+    if err != nil {
+        fmt.Println("Error sending bid:", err)
+        return
+    }
+
+    fmt.Printf("Outcome: %s | %s\n", res.Outcome.String(), res.Message)
+}
+
+func handleResult(client pb.AuctionServiceClient) {
+    req := &pb.ResultRequest{}
+
+    res, err := client.Result(context.Background(), req)
+    if err != nil {
+        fmt.Println("Error getting result:", err)
+        return
+    }
+
+    fmt.Println("Auction Over:", res.AuctionOver)
+    fmt.Println("Highest Bid:", res.HighestBid)
+    fmt.Println("Winner:", res.Winner)
 }
 
