@@ -20,7 +20,7 @@ service AuctionService {
   // Backup sends heartbeats to primary to detect failures
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   
-  // Election message for Bully Algorithm (sent to higher-ID server)
+  // Election message for Bully Algorithm (sent to higher-ID server) not actually using algorithm. Relic.
   rpc StartElection(ElectionRequest) returns (ElectionResponse);
   
   // New primary announces itself to backup

@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"flag"
 	"fmt"
 	"log"
-	pb "github.com/PerkyMan227/ReplactionDS/proto/proto"
-	"flag"
-	"bufio"
 	"os"
+	"strings"
 
+	pb "github.com/PerkyMan227/ReplactionDS/proto/proto"
+
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"github.com/google/uuid"
 )
 
 type Client struct {
@@ -31,12 +34,6 @@ type Ack struct {
 	Outcome Outcome
 }
 
-type Result struct {
-	AuctionOver bool   // true if auction ended
-	HighestBid  int    // current highest bid
-	Winner      string // bidder ID of winner (if auction ended)
-}
-
 func main() {
 	//define flag
 	idFlag := flag.String("id", "", "Unique ID for the bidder")
@@ -49,7 +46,6 @@ func main() {
 	}
 
 	fmt.Println("Using bidder ID:", bidderID)
-	
 
 	//connect to server
 	connection, err := grpc.NewClient("localhost:5001", grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -62,6 +58,31 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
+		fmt.Print("> ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if input == "exit" {
+			fmt.Println("Exiting client.")
+			return
+		}
+
+		// Handle "result"
+		if input == "result" {
+			handleResult(client)
+			continue
+		}
+
+		// Handle "bid <amount>"
+		var amount int32
+		n, _ := fmt.Sscanf(input, "bid %d", &amount)
+		if n == 1 {
+			handleBid(client, bidderID, amount)
+			continue
+		}
+
+		fmt.Printf("Unknown command. Use: bid <amount>, result, exit... Recieved input: %s", input)
+		fmt.Println()
 		// WHAT DO??
 		// if reader.equals("bid")
 
@@ -70,40 +91,33 @@ func main() {
 		// GET RESULT -> send request to server for result with client.Result()
 	}
 
-
-
-
-
-
-
 }
 
-func handleBid(client pb.AuctionServiceClient, bidderID string, amount int64) {
-    req := &pb.BidRequest{
-        BidderId: bidderID,
-        Amount:   amount,
-    }
+func handleBid(client pb.AuctionServiceClient, bidderID string, amount int32) {
+	req := &pb.BidRequest{
+		BidderId: bidderID,
+		Amount:   amount,
+	}
 
-    res, err := client.Bid(context.Background(), req)
-    if err != nil {
-        fmt.Println("Error sending bid:", err)
-        return
-    }
+	res, err := client.Bid(context.Background(), req)
+	if err != nil {
+		fmt.Println("Error sending bid:", err)
+		
+		return
+	}
 
-    fmt.Printf("Outcome: %s | %s\n", res.Outcome.String(), res.Message)
+	fmt.Printf("Outcome: %s | %s\n", res.Outcome.String(), res.Message)
 }
 
 func handleResult(client pb.AuctionServiceClient) {
-    req := &pb.ResultRequest{}
+	req := &pb.ResultRequest{}
 
-    res, err := client.Result(context.Background(), req)
-    if err != nil {
-        fmt.Println("Error getting result:", err)
-        return
-    }
-
-    fmt.Println("Auction Over:", res.AuctionOver)
-    fmt.Println("Highest Bid:", res.HighestBid)
-    fmt.Println("Winner:", res.Winner)
+	res, err := client.Result(context.Background(), req)
+	if err != nil {
+		fmt.Println("Error getting result:", err)
+		return
+	}
+	fmt.Println("Auction Over:", res.AuctionEnded)
+	fmt.Println("Highest Bid:", res.HighestBid)
+	fmt.Println("Winner:", res.HighestBidder)
 }
-

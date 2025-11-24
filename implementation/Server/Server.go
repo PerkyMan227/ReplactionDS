@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ type AuctionState struct {
 	RegisteredBidders    []string
 }
 
+
+
 func main() {
 	ServerID := flag.Int("id", 1, "ServerID (1 or 2)")
 	port := flag.Int("port", 5001, "Port to listen on")
@@ -68,6 +71,18 @@ func main() {
 	}
 
 	//start grpc server
+
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", server.port))
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	pb.RegisterAuctionServiceServer(grpcServer, server)
+
+	log.Printf("Server %d listening on port %d", server.ServerID, server.port)
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	}
 
 }
 
@@ -202,7 +217,24 @@ func (s *Server) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, 
 
 	log.Printf("Bid accepted! %s is now winning with $%d", bidderID, amount)
 
-	//REPLICATE TO BACKUP HERE
+	// REPLICATION TO BACKUP HERE
+	if s.peerClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		stateUpdate := &pb.StateUpdate{
+			SenderServerId: s.ServerID,
+			State:          s.convertStateToProto(),
+			Timestamp:      time.Now().UnixMilli(),
+		}
+
+		ack, err := s.peerClient.ReplicateState(ctx, stateUpdate)
+		if err != nil {
+			log.Printf("Warning: Failed to replicate state to backup server: %v", err)
+		} else if ack.Success {
+			log.Printf("Success: State replicated sucessfully to backupserver %d", ack.ServerId)
+		}
+	}
 
 	return &pb.BidResponse{
 		Outcome: pb.BidResponse_SUCCESS,
@@ -239,7 +271,26 @@ func (s *Server) Result(ctx context.Context, req *pb.ResultRequest) (*pb.ResultR
 }
 
 func (s *Server) ReplicateState(ctx context.Context, req *pb.StateUpdate) (*pb.StateAck, error) {
-	return &pb.StateAck{Success: true, ServerId: s.ServerID}, nil
+	log.Printf("State replication recieved from server %d ", req.SenderServerId)
+
+	pbState := req.State
+
+	s.state.BidderHighestBids = pbState.BidderHighestBids
+	s.state.CurrentHighestBidder = pbState.CurrentHighestBidder
+	s.state.CurrentHighestBid = pbState.CurrentHighestBid
+	s.state.AuctionStartTime = pbState.AuctionStartTime
+	s.state.AuctionEndTime = pbState.AuctionEndTime
+	s.state.AuctionEnded = pbState.AuctionEnded
+	s.state.RegisteredBidders = pbState.RegisteredBidders
+
+	log.Printf("Replicated state from server %d", req.SenderServerId)
+
+	return &pb.StateAck{
+		Success:      true,
+		ServerId:     s.ServerID,
+		ErrorMessage: "",
+	}, nil
+
 }
 
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
@@ -259,4 +310,16 @@ func (s *Server) StartElection(ctx context.Context, req *pb.ElectionRequest) (*p
 
 func (s *Server) AnnounceLeader(ctx context.Context, req *pb.LeaderAnnouncement) (*pb.LeaderAck, error) {
 	return &pb.LeaderAck{Acknowledged: true, ServerId: s.ServerID}, nil
+}
+
+func (s *Server) convertStateToProto() *pb.AuctionState {
+	return &pb.AuctionState{
+		BidderHighestBids:    s.state.BidderHighestBids,
+		CurrentHighestBidder: s.state.CurrentHighestBidder,
+		CurrentHighestBid:    s.state.CurrentHighestBid,
+		AuctionStartTime:     s.state.AuctionStartTime,
+		AuctionEndTime:       s.state.AuctionEndTime,
+		AuctionEnded:         s.state.AuctionEnded,
+		RegisteredBidders:    s.state.RegisteredBidders,
+	}
 }
